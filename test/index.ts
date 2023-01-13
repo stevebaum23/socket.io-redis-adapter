@@ -192,6 +192,82 @@ describe(`socket.io-redis with ${
     });
   });
 
+  it("unsubscribes when close is called", async () => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const getNumPatterns = async () => {
+          if (process.env.REDIS_CLIENT === undefined) {
+            return await namespace3.adapter.pubClient.sendCommand([
+              "pubsub",
+              "numpat",
+            ]);
+          } else if (process.env.REDIS_CLIENT === "ioredis") {
+            return await namespace3.adapter.pubClient.call("pubsub", "numpat");
+          } else {
+            return await new Promise((resolve, reject) => {
+              namespace3.adapter.pubClient.sendCommand(
+                "pubsub",
+                ["numpat"],
+                (err, result) => {
+                  if (err) {
+                    reject(err);
+                  }
+                  resolve(result);
+                }
+              );
+            });
+          }
+        };
+
+        const getNumChannels = async () => {
+          if (process.env.REDIS_CLIENT === undefined) {
+            return (
+              await namespace3.adapter.pubClient.sendCommand([
+                "pubsub",
+                "channels",
+              ])
+            ).length;
+          } else if (process.env.REDIS_CLIENT === "ioredis") {
+            return (
+              await namespace3.adapter.pubClient.call("pubsub", "channels")
+            ).length;
+          } else {
+            return await new Promise((resolve, reject) => {
+              namespace3.adapter.pubClient.sendCommand(
+                "pubsub",
+                ["channels"],
+                (err, result) => {
+                  if (err) {
+                    reject(err);
+                  }
+                  resolve(result.length);
+                }
+              );
+            });
+          }
+        };
+
+        expect(await getNumPatterns()).to.be(3); // 1 pattern for each namespace
+        expect(await getNumChannels()).to.be(5); // 2 shared (request/response) + 3 unique for each namespace
+
+        namespace1.adapter.close();
+
+        // Give it a moment to unsubscribe
+        setTimeout(async () => {
+          try {
+            expect(await getNumPatterns()).to.be(2); // 1 less pattern
+            expect(await getNumChannels()).to.be(4); // 1 less sub
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        }, 300);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+
   if (process.env.REDIS_CLIENT === undefined) {
     // redis@4
     it("ignores messages from unknown channels", (done) => {
